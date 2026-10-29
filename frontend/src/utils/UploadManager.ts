@@ -52,6 +52,12 @@ export interface AlbumError {
   Error: string;
 }
 
+export interface UploadProgressSnapshot {
+  timestamp: number;
+  bytes: number;
+  files: number;
+}
+
 function isSkippedUploadWarning(code: string): boolean {
   return code === "incomplete-live-photo-skipped" || code === "ambiguous-filename-stem";
 }
@@ -66,10 +72,10 @@ export interface UploadState {
   // Byte tracking
   totalBytes: number;
   uploadedBytes: number;
-  // Timing
+  // Timing & estimation
   startTime: number;
-  // Speed calculation (bytes per second)
   uploadSpeed: number;
+  etaSeconds: number | null;
   // Album creation
   albumStatus: AlbumStatus | null;
   isCreatingAlbum: boolean;
@@ -95,14 +101,16 @@ class UploadManager {
     uploadedBytes: 0,
     startTime: 0,
     uploadSpeed: 0,
+    etaSeconds: null,
     albumStatus: null,
     isCreatingAlbum: false,
   });
 
-  // For speed calculation
-  private lastSpeedUpdate: number = 0;
-  private lastBytesUploaded: number = 0;
-  private speedSamples: number[] = [];
+  // For speed and ETA calculation (sliding history buffer)
+  private progressHistory: UploadProgressSnapshot[] = [];
+  // For ETA calculation
+  private smoothedEta: number | null = null;
+  private lastEtaUpdate: number = 0;
   // Track bytes from completed files
   private completedBytes: number = 0;
   // Track the last known BytesTotal for each file
@@ -113,8 +121,10 @@ class UploadManager {
   private constructor() {
     // Bind all methods to ensure 'this' context is preserved
     this.resetUploadResults = this.resetUploadResults.bind(this);
+    this.clearResults = this.clearResults.bind(this);
     this.cancelUpload = this.cancelUpload.bind(this);
     this.copyResultsAsJson = this.copyResultsAsJson.bind(this);
+    this.tickEta = this.tickEta.bind(this);
 
     this.setupEventListeners();
   }
@@ -137,12 +147,13 @@ class UploadManager {
       this.state.threads.clear();
       this.state.startTime = Date.now();
       this.state.uploadSpeed = 0;
-      this.lastSpeedUpdate = Date.now();
-      this.lastBytesUploaded = 0;
-      this.speedSamples = [];
       this.completedBytes = 0;
       this.fileBytes.clear();
       this.totalBytesAdjustment = 0;
+      this.state.etaSeconds = null;
+      this.smoothedEta = null;
+      this.lastEtaUpdate = 0;
+      this.progressHistory = [];
       this.resetUploadResults();
       this.state.warnings = [];
     });
@@ -171,15 +182,13 @@ class UploadManager {
     // Handle thread status updates
     Events.On("ThreadStatus", (event: { data: ThreadStatus }) => {
       const thread = event.data;
-      const prevThread = this.state.threads.get(thread.WorkerID);
 
       if (thread.Status === 'uploading' && thread.FilePath && thread.BytesTotal > 0) {
         this.fileBytes.set(thread.FilePath, thread.BytesTotal);
       }
 
-      if (thread.Status === 'error' && prevThread?.Message !== thread.Message) {
-        window.dispatchEvent(new CustomEvent('uploadError', { detail: thread }));
-      }
+      // Suppress individual toast flood on thread error:
+      // Status is shown live in active threads and collected in Results.
       
       this.state.threads.set(thread.WorkerID, thread);
       this.updateBytesAndSpeed();
@@ -210,12 +219,17 @@ class UploadManager {
         && this.state.results.fail.length === 0
       ) {
         this.state.isUploading = false;
+        window.dispatchEvent(new CustomEvent('uploadFinished', { detail: { results: this.state.results } }));
       }
     });
 
     // Handle upload stop
     Events.On("uploadStop", () => {
+      const wasUploading = this.state.isUploading;
       this.state.isUploading = false;
+      if (wasUploading) {
+        window.dispatchEvent(new CustomEvent('uploadFinished', { detail: { results: this.state.results } }));
+      }
     });
 
     // Handle album creation progress
@@ -254,27 +268,151 @@ class UploadManager {
     const totalUploaded = this.completedBytes + activeUploadedBytes;
     this.state.uploadedBytes = totalUploaded;
 
-    // Calculate speed (using rolling average)
     const now = Date.now();
-    const timeDelta = now - this.lastSpeedUpdate;
 
-    if (timeDelta >= 500) { // Update speed every 500ms
-      const bytesDelta = totalUploaded - this.lastBytesUploaded;
-      const instantSpeed = (bytesDelta / timeDelta) * 1000; // bytes per second
+    // Sample progress snapshots at most every 400ms into history buffer
+    const lastSnap = this.progressHistory.length > 0 ? this.progressHistory[this.progressHistory.length - 1] : null;
+    if (!lastSnap || now - lastSnap.timestamp >= 400) {
+      this.progressHistory.push({
+        timestamp: now,
+        bytes: totalUploaded,
+        files: this.state.uploadedFiles,
+      });
 
-      if (instantSpeed >= 0) {
-        this.speedSamples.push(instantSpeed);
-        // Keep last 5 samples for smoothing
-        if (this.speedSamples.length > 5) {
-          this.speedSamples.shift();
-        }
-        // Calculate average speed
-        this.state.uploadSpeed = this.speedSamples.reduce((a, b) => a + b, 0) / this.speedSamples.length;
+      // Retain 10 seconds of sliding window history
+      const cutoff = now - 10000;
+      while (this.progressHistory.length > 2 && this.progressHistory[0].timestamp < cutoff) {
+        this.progressHistory.shift();
       }
 
-      this.lastSpeedUpdate = now;
-      this.lastBytesUploaded = totalUploaded;
+      // Compute rolling speed across the sliding window (smooths inter-file lulls)
+      if (this.progressHistory.length >= 2) {
+        const oldest = this.progressHistory[0];
+        const spanMs = now - oldest.timestamp;
+        if (spanMs >= 800) {
+          const bytesSpan = totalUploaded - oldest.bytes;
+          this.state.uploadSpeed = Math.max(0, (bytesSpan / spanMs) * 1000);
+        }
+      }
     }
+
+    this.updateEta();
+  }
+
+  /**
+   * Ticks down ETA by 1 second during active uploads for natural wall-clock countdown.
+   */
+  public tickEta() {
+    if (!this.state.isUploading || this.state.etaSeconds === null || this.state.startTime === 0) {
+      return;
+    }
+    if (this.state.etaSeconds > 1) {
+      this.state.etaSeconds -= 1;
+      if (this.smoothedEta !== null && this.smoothedEta > 1) {
+        this.smoothedEta = Math.max(0, this.smoothedEta - 1);
+      }
+    }
+  }
+
+  public updateEta() {
+    const now = Date.now();
+    if (!this.state.isUploading || this.state.startTime === 0) {
+      this.state.etaSeconds = null;
+      this.smoothedEta = null;
+      return;
+    }
+
+    const elapsedMs = now - this.state.startTime;
+    // Allow initial 3.5 seconds for worker threads to start transferring and calibrate
+    if (elapsedMs < 3500) {
+      this.state.etaSeconds = null;
+      return;
+    }
+
+    // Limit recalculation frequency to at most once per 500ms
+    if (now - this.lastEtaUpdate < 500 && this.state.etaSeconds !== null) {
+      return;
+    }
+
+    // Calculate composite progress: blend 65% byte progress with 35% file completion progress
+    // to properly account for per-file network/commit latency in multi-file batches.
+    let compositeProgress = 0;
+    if (this.state.totalBytes > 0 && this.state.totalFiles > 0) {
+      const byteRatio = Math.min(1, Math.max(0, this.state.uploadedBytes / this.state.totalBytes));
+      const fileRatio = Math.min(1, Math.max(0, this.state.uploadedFiles / this.state.totalFiles));
+      compositeProgress = 0.65 * byteRatio + 0.35 * fileRatio;
+    } else if (this.state.totalFiles > 0) {
+      compositeProgress = Math.min(1, Math.max(0, this.state.uploadedFiles / this.state.totalFiles));
+    } else if (this.state.totalBytes > 0) {
+      compositeProgress = Math.min(1, Math.max(0, this.state.uploadedBytes / this.state.totalBytes));
+    }
+
+    if (compositeProgress >= 1 || (this.state.totalFiles > 0 && this.state.uploadedFiles >= this.state.totalFiles)) {
+      this.state.etaSeconds = 0;
+      this.smoothedEta = 0;
+      this.lastEtaUpdate = now;
+      return;
+    }
+
+    // 1. Cumulative session rate (progress per ms)
+    const cumulativeRate = compositeProgress / elapsedMs;
+
+    // 2. Rolling window rate from sliding history buffer (past 8-10 seconds)
+    let windowRate = cumulativeRate;
+    if (this.progressHistory.length >= 2) {
+      const oldest = this.progressHistory[0];
+      const dt = now - oldest.timestamp;
+      if (dt >= 2000) {
+        let oldProg = 0;
+        if (this.state.totalBytes > 0 && this.state.totalFiles > 0) {
+          const bRatio = Math.min(1, Math.max(0, oldest.bytes / this.state.totalBytes));
+          const fRatio = Math.min(1, Math.max(0, oldest.files / this.state.totalFiles));
+          oldProg = 0.65 * bRatio + 0.35 * fRatio;
+        } else if (this.state.totalFiles > 0) {
+          oldProg = Math.min(1, Math.max(0, oldest.files / this.state.totalFiles));
+        } else if (this.state.totalBytes > 0) {
+          oldProg = Math.min(1, Math.max(0, oldest.bytes / this.state.totalBytes));
+        }
+        const dProg = Math.max(0, compositeProgress - oldProg);
+        windowRate = dProg / dt;
+      }
+    }
+
+    // Blend cumulative session rate with windowed rate (50% cumulative, 50% windowed)
+    // Cumulative anchors against pauses; windowed adapts to genuine line changes.
+    let effectiveRate = 0.5 * windowRate + 0.5 * cumulativeRate;
+    if (effectiveRate <= 0) {
+      effectiveRate = cumulativeRate;
+    }
+
+    let rawEta: number | null = null;
+    const remainingProgress = Math.max(0, 1 - compositeProgress);
+    if (effectiveRate > 0) {
+      rawEta = (remainingProgress / effectiveRate) / 1000; // convert ms to seconds
+    }
+
+    if (rawEta !== null && isFinite(rawEta) && rawEta >= 0) {
+      if (this.smoothedEta === null) {
+        this.smoothedEta = rawEta;
+      } else {
+        const dtSec = Math.max(0.1, (now - this.lastEtaUpdate) / 1000);
+        if (rawEta < this.smoothedEta) {
+          // Faster progress: adapt with alpha = 0.20
+          this.smoothedEta = 0.80 * this.smoothedEta + 0.20 * rawEta;
+        } else {
+          // Slower / momentary stall: adapt with heavily damped alpha = 0.05
+          const candidate = 0.95 * this.smoothedEta + 0.05 * rawEta;
+          // Clamp upward jump so a pause cannot increase ETA by more than 1.5s per elapsed second
+          const maxAllowed = this.smoothedEta + dtSec * 1.5;
+          this.smoothedEta = Math.min(candidate, maxAllowed);
+        }
+      }
+      this.state.etaSeconds = Math.max(0, Math.round(this.smoothedEta));
+    } else {
+      this.state.etaSeconds = null;
+    }
+
+    this.lastEtaUpdate = now;
   }
 
   public resetUploadResults() {
@@ -282,6 +420,26 @@ class UploadManager {
     this.state.results.fail = [];
     this.state.results.skipped = [];
     this.state.results.warnings = [];
+    this.state.etaSeconds = null;
+    this.smoothedEta = null;
+    this.lastEtaUpdate = 0;
+    this.progressHistory = [];
+  }
+
+  public clearResults() {
+    this.resetUploadResults();
+    this.state.totalFiles = 0;
+    this.state.uploadedFiles = 0;
+    this.state.totalBytes = 0;
+    this.state.uploadedBytes = 0;
+    this.state.uploadSpeed = 0;
+    this.state.etaSeconds = null;
+    this.smoothedEta = null;
+    this.lastEtaUpdate = 0;
+    this.state.warnings = [];
+    this.state.albumStatus = null;
+    this.state.threads.clear();
+    this.progressHistory = [];
   }
 
   public cancelUpload() {

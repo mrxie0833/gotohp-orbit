@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { Browser } from '@wailsio/runtime'
 import { toast } from 'vue-sonner'
-import { ChevronDown, ExternalLink } from '@lucide/vue'
+import { ChevronDown, ExternalLink, ShieldCheck } from '@lucide/vue'
 import { ConfigManager } from '../../bindings/app/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -93,48 +93,57 @@ async function addRawCredential() {
   <Sheet v-model:open="isOpen">
     <SheetContent
       side="bottom"
-      class="max-h-[92vh] overflow-y-auto"
+      class="max-h-[92vh] overflow-y-auto bg-card/95 backdrop-blur-md border-t border-border/80 shadow-2xl rounded-t-2xl"
       style="--wails-draggable: none"
     >
-      <div class="mx-auto flex w-full max-w-sm flex-col px-5 pt-1 pb-6">
-        <SheetHeader class="gap-0 px-0 pb-4 text-center">
-          <SheetTitle>Connect Google Photos</SheetTitle>
+      <div class="mx-auto flex w-full max-w-sm flex-col px-4 pt-1 pb-6">
+        <SheetHeader class="gap-0.5 px-0 pb-3.5 text-center">
+          <div class="mx-auto size-10 rounded-2xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center mb-1.5">
+            <ShieldCheck :size="20" />
+          </div>
+          <SheetTitle class="text-sm font-semibold tracking-tight text-foreground">
+            Connect Google Photos
+          </SheetTitle>
+          <p class="text-[11px] text-muted-foreground">
+            Sign in to upload photos directly to your account
+          </p>
         </SheetHeader>
 
-        <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-3.5">
           <!-- Step 1: open sign-in -->
-          <div class="flex flex-col gap-2">
-            <p class="flex items-center gap-2 text-sm font-medium select-none">
-              <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs">1</span>
-              Open the Google sign-in page
+          <div class="flex flex-col gap-2 rounded-xl border border-border/60 bg-background/50 p-3">
+            <p class="flex items-center gap-2 text-xs font-semibold text-foreground select-none">
+              <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary text-[11px] font-bold">1</span>
+              Open Google sign-in
             </p>
             <Button
               type="button"
               variant="outline"
-              class="cursor-pointer select-none"
+              size="sm"
+              class="h-8 text-xs cursor-pointer select-none font-medium hover:bg-accent/60"
               :disabled="isConnecting"
               @click="openEmbeddedSetup"
             >
-              <ExternalLink class="size-4" />
-              Open sign-in
+              <ExternalLink class="size-3.5 mr-1 text-primary" />
+              Open sign-in page
             </Button>
-            <ol class="list-decimal space-y-1 rounded-lg border bg-muted/30 py-2.5 pr-3 pl-7 text-xs leading-snug text-muted-foreground">
+            <ol class="list-decimal space-y-1 rounded-lg border border-border/50 bg-muted/20 py-2 pr-2.5 pl-6 text-[11px] leading-snug text-muted-foreground">
               <li>
-                Sign in, then click <span class="text-foreground">I agree</span>. The page may hang on a spinner. That's fine.
+                Sign in, then click <strong class="text-foreground">I agree</strong>. (Page may load indefinitely; this is normal).
               </li>
-              <li>Open DevTools, then Application or Storage → Cookies → accounts.google.com.</li>
-              <li>Copy the <code class="text-foreground">oauth_token</code> cookie's value.</li>
+              <li>Open DevTools → Application/Storage → Cookies → <code class="text-foreground">accounts.google.com</code>.</li>
+              <li>Copy the <code class="text-primary font-mono font-medium">oauth_token</code> cookie value.</li>
             </ol>
           </div>
 
           <!-- Step 2: paste token -->
-          <div class="flex flex-col gap-2">
+          <div class="flex flex-col gap-2 rounded-xl border border-border/60 bg-background/50 p-3">
             <Label
               for="google-oauth-token"
-              class="flex items-center gap-2 text-sm font-medium"
+              class="flex items-center gap-2 text-xs font-semibold text-foreground"
             >
-              <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs">2</span>
-              Paste the oauth_token value
+              <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary text-[11px] font-bold">2</span>
+              Paste oauth_token
             </Label>
             <Input
               id="google-oauth-token"
@@ -142,13 +151,15 @@ async function addRawCredential() {
               type="password"
               autocomplete="off"
               spellcheck="false"
-              placeholder="Paste the cookie value"
+              placeholder="Paste oauth_token cookie value"
+              class="h-8 text-xs bg-background/80"
               :disabled="isConnecting"
               @keydown.enter="connectAccount"
             />
             <Button
               type="button"
-              class="cursor-pointer select-none"
+              size="sm"
+              class="h-8 text-xs cursor-pointer select-none font-medium"
               :disabled="!oauthToken.trim() || isConnecting"
               @click="connectAccount"
             >
@@ -157,21 +168,21 @@ async function addRawCredential() {
           </div>
         </div>
 
-        <div class="mt-4 border-t pt-3">
+        <div class="mt-3.5 border-t border-border/60 pt-2.5">
           <button
             type="button"
-            class="flex w-full items-center gap-1 text-xs text-muted-foreground select-none hover:text-foreground"
+            class="flex w-full items-center justify-center gap-1.5 py-1 text-[11px] text-muted-foreground select-none hover:text-foreground transition-colors cursor-pointer"
             @click="showAdvanced = !showAdvanced"
           >
             <ChevronDown
               class="size-3.5 transition-transform"
               :class="showAdvanced && 'rotate-180'"
             />
-            Paste a captured credential instead
+            <span>Advanced: paste raw credential string</span>
           </button>
           <div
             v-if="showAdvanced"
-            class="mt-3 flex flex-col gap-2"
+            class="mt-2.5 flex flex-col gap-2 rounded-xl border border-border/60 bg-background/40 p-2.5"
           >
             <Input
               id="google-raw-credential"
@@ -180,13 +191,15 @@ async function addRawCredential() {
               autocomplete="off"
               spellcheck="false"
               placeholder="androidId=...&Email=..."
+              class="h-8 text-xs bg-background/80"
               :disabled="isAddingRawCredential"
               @keydown.enter="addRawCredential"
             />
             <Button
               type="button"
               variant="outline"
-              class="cursor-pointer select-none"
+              size="sm"
+              class="h-8 text-xs cursor-pointer select-none font-medium"
               :disabled="!rawCredential.trim() || isAddingRawCredential"
               @click="addRawCredential"
             >

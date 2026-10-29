@@ -1,32 +1,38 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { useColorMode } from '@vueuse/core'
+import { Events } from '@wailsio/runtime'
+import { toast } from 'vue-sonner'
+import {
+  UploadCloud,
+  ListCheck,
+  Settings2,
+  UserPlus,
+  FolderPlus,
+  Layers,
+  Smartphone,
+} from '@lucide/vue'
+
+import { ConfigManager } from '../bindings/app/core'
+import Button from './components/ui/button/Button.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import {
-  Sheet,
-  SheetContent,
-  SheetTrigger,
-} from '@/components/ui/sheet'
-import { useColorMode } from '@vueuse/core'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { UserPlus } from '@lucide/vue'
-import { ConfigManager } from '../bindings/app/core'
-import { Events } from '@wailsio/runtime'
-import Button from "./components/ui/button/Button.vue"
-import GoogleAccountSelect from './components/GoogleAccountSelect.vue'
-import GoogleAuthSetup from "./components/GoogleAuthSetup.vue"
-import './index.css'
-import SettingsPanel from "./SettingsPanel.vue"
-import Upload from './Upload.vue'
-import { uploadManager } from './utils/UploadManager'
 import Toaster from './components/ui/sonner/Sonner.vue'
+import GoogleAccountSelect from './components/GoogleAccountSelect.vue'
+import GoogleAuthSetup from './components/GoogleAuthSetup.vue'
+import SettingsPanel from './SettingsPanel.vue'
+import Upload from './Upload.vue'
+import UploadResults from './components/UploadResults.vue'
+import { uploadManager } from './utils/UploadManager'
+import './index.css'
 
-import { toast } from "vue-sonner"
-
-useColorMode().value = "dark"
+useColorMode().value = 'dark'
 
 const { state: uploadState } = uploadManager
-const copyButtonText = ref('Copy as JSON');
+
+type ActiveTab = 'upload' | 'results' | 'settings'
+const activeTab = ref<ActiveTab>('upload')
 
 // Drag state for dual drop zones
 const isDraggingFiles = ref(false)
@@ -133,26 +139,12 @@ function openAccountSetup() {
   isAccountSetupOpen.value = true
 }
 
-onMounted(async () => {
-  await refreshCredentials()
-
-})
-
-const handleCopyClick = () => {
-  uploadManager.copyResultsAsJson();
-  copyButtonText.value = 'Copied!';
-  setTimeout(() => copyButtonText.value = 'Copy as JSON', 1000);
-};
-
-
-
 // Global drag event handlers to detect file dragging
 let dragLeaveTimeout: ReturnType<typeof setTimeout> | null = null
 
 const onDragEnter = (e: DragEvent) => {
   if (!e.dataTransfer?.types.includes('Files')) return
   
-  // Clear any pending drag leave timeout
   if (dragLeaveTimeout) {
     clearTimeout(dragLeaveTimeout)
     dragLeaveTimeout = null
@@ -165,7 +157,6 @@ const onDragOver = (e: DragEvent) => {
   if (!e.dataTransfer?.types.includes('Files')) return
   e.preventDefault()
   
-  // Clear any pending drag leave timeout - we're still dragging
   if (dragLeaveTimeout) {
     clearTimeout(dragLeaveTimeout)
     dragLeaveTimeout = null
@@ -175,8 +166,6 @@ const onDragOver = (e: DragEvent) => {
 const onDragLeave = (e: DragEvent) => {
   if (!e.dataTransfer?.types.includes('Files')) return
   
-  // Use timeout to detect if we've truly left the window
-  // dragover will cancel this if we're still in the window
   if (dragLeaveTimeout) {
     clearTimeout(dragLeaveTimeout)
   }
@@ -187,14 +176,11 @@ const onDragLeave = (e: DragEvent) => {
 }
 
 const onDrop = () => {
-  // Clear any pending timeout
   if (dragLeaveTimeout) {
     clearTimeout(dragLeaveTimeout)
     dragLeaveTimeout = null
   }
   
-  // Delay resetting isDraggingFiles to allow Wails to process the drop target
-  // before Vue re-renders and hides the drop zones
   setTimeout(() => {
     isDraggingFiles.value = false
   }, 100)
@@ -202,29 +188,27 @@ const onDrop = () => {
 
 // Album upload confirmation
 const confirmAlbumUpload = async () => {
-  // Set album name in backend (not persisted to disk)
   await ConfigManager.SetAlbumName(albumNameOrKey.value)
   await ConfigManager.SetAlbumAutoMode(false)
-  // Start upload with pending files
+  activeTab.value = 'upload'
   Events.Emit('startUpload', { files: pendingFiles.value })
   showAlbumInput.value = false
   pendingFiles.value = []
   pendingFileCount.value = 0
-  albumNameOrKey.value = '' // Reset for next upload
+  albumNameOrKey.value = ''
 }
 
 const cancelAlbumUpload = () => {
   showAlbumInput.value = false
   pendingFiles.value = []
   pendingFileCount.value = 0
-  albumNameOrKey.value = '' // Reset on cancel too
+  albumNameOrKey.value = ''
 }
 
 // Handle album error event
 const albumErrorHandler = (e: Event) => {
   const event = e as CustomEvent<{ AlbumName: string; Error: string }>
   const { AlbumName, Error } = event.detail
-  // Check if it's a 404 error (album key not found)
   if (Error.includes('404')) {
     toast.error('Album not found', {
       description: `The album key "${AlbumName}" does not exist or is invalid.`,
@@ -236,31 +220,41 @@ const albumErrorHandler = (e: Event) => {
   }
 }
 
-const uploadErrorHandler = (e: Event) => {
-  const event = e as CustomEvent<{ FileName: string; Message: string }>
-  const { FileName, Message } = event.detail
-  const errorMessage = Message.replace(/^Error:\s*/, '')
-  toast.error(FileName ? `Upload failed: ${FileName}` : 'Upload failed', {
-    description: errorMessage,
-    duration: 10000,
-    important: true,
-  })
+// Handle upload batch completion event
+const uploadFinishedHandler = () => {
+  activeTab.value = 'results'
+  const fail = uploadState.results.fail.length
+  const success = uploadState.results.success.length
+  const skipped = uploadState.results.skipped.length
+
+  if (fail > 0) {
+    toast.warning(`Upload completed with ${fail} error(s)`, {
+      description: `${success} succeeded, ${skipped} skipped. Check Results for details.`,
+    })
+  } else if (success > 0) {
+    toast.success(`Upload complete: ${success} file(s) uploaded`, {
+      description: skipped > 0 ? `${skipped} skipped.` : undefined,
+    })
+  } else if (skipped > 0) {
+    toast.info(`Upload finished: ${skipped} file(s) skipped`)
+  }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await refreshCredentials()
+
   document.addEventListener('dragenter', onDragEnter)
   document.addEventListener('dragleave', onDragLeave)
   document.addEventListener('dragover', onDragOver)
   document.addEventListener('drop', onDrop)
   window.addEventListener('albumError', albumErrorHandler)
-  window.addEventListener('uploadError', uploadErrorHandler)
+  window.addEventListener('uploadFinished', uploadFinishedHandler)
 
   // Listen for files-dropped event from backend
   Events.On('files-dropped', async (event: { data: { files: string[]; dropZone: string } }) => {
     const { files, dropZone } = event.data
 
     if (dropZone === 'album') {
-      // Show album input screen
       pendingFiles.value = files
       pendingFileCount.value = files.length
       showAlbumInput.value = true
@@ -268,6 +262,7 @@ onMounted(() => {
       try {
         await ConfigManager.SetAlbumName('')
         await ConfigManager.SetAlbumAutoMode(dropZone === 'auto-album')
+        activeTab.value = 'upload'
         await Events.Emit('startUpload', { files })
       } catch (error) {
         console.error('Failed to start upload:', error)
@@ -285,7 +280,7 @@ onUnmounted(() => {
   document.removeEventListener('dragover', onDragOver)
   document.removeEventListener('drop', onDrop)
   window.removeEventListener('albumError', albumErrorHandler)
-  window.removeEventListener('uploadError', uploadErrorHandler)
+  window.removeEventListener('uploadFinished', uploadFinishedHandler)
   if (dragLeaveTimeout) {
     clearTimeout(dragLeaveTimeout)
   }
@@ -293,133 +288,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main
-    class="w-screen h-screen flex flex-col items-center"
-    style="--wails-draggable: drag"
-  >
-    <!-- Drop zones shown when dragging files -->
-    <div
-      v-if="!uploadState.isUploading && isDraggingFiles && options.length > 0"
-      class="w-screen h-screen flex flex-col gap-3 p-6"
-      style="--wails-draggable: none"
+  <main class="w-screen h-screen flex flex-col bg-background text-foreground overflow-hidden select-none">
+    <!-- Top Account & Drag Header -->
+    <header
+      class="h-10 px-3 border-b bg-card/50 backdrop-blur-sm flex items-center justify-between shrink-0"
+      style="--wails-draggable: drag"
     >
       <div
-        data-file-drop-target
-        data-drop-zone="regular"
-        class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/50 rounded-xl transition-all duration-200 drop-zone"
+        class="flex items-center gap-2 min-w-0"
+        style="--wails-draggable: none"
       >
-        <h2 class="text-xl font-semibold select-none text-muted-foreground">
-          Upload Only
-        </h2>
-        <p class="text-sm text-muted-foreground/70 mt-2 select-none text-center px-4">
-          Upload files without adding to any album
-        </p>
-      </div>
-      <div
-        data-file-drop-target
-        data-drop-zone="album"
-        class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/50 rounded-xl transition-all duration-200 drop-zone"
-      >
-        <h2 class="text-xl font-semibold select-none text-muted-foreground">
-          Upload to Album
-        </h2>
-        <p class="text-sm text-muted-foreground/70 mt-2 select-none text-center px-4">
-          Upload and add to a specific album (you'll enter the name)
-        </p>
-      </div>
-      <div
-        data-file-drop-target
-        data-drop-zone="auto-album"
-        class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/50 rounded-xl transition-all duration-200 drop-zone"
-      >
-        <h2 class="text-xl font-semibold select-none text-muted-foreground">
-          Auto Album
-        </h2>
-        <p class="text-sm text-muted-foreground/70 mt-2 select-none text-center px-4">
-          Upload and create albums automatically based on folder names
-        </p>
-      </div>
-    </div>
-
-    <!-- Normal UI (not dragging) -->
-    <div
-      v-else-if="!uploadState.isUploading"
-      class="w-screen h-screen flex flex-col items-center gap-4 max-w-md px-6 pt-30"
-      data-file-drop-target
-    >
-      <template v-if="options.length === 0">
-        <div class="flex max-w-xs flex-col items-center gap-4 text-center">
-          <div class="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            <UserPlus class="size-5" />
-          </div>
-          <div class="flex flex-col gap-1">
-            <h1 class="text-xl font-semibold select-none">
-              Connect Google Photos
-            </h1>
-            <p class="text-sm text-muted-foreground select-none">
-              Add an account before uploading photos and videos.
-            </p>
-          </div>
-          <Button
-            class="cursor-pointer select-none"
-            @click="openAccountSetup"
-          >
-            Add Google account
-          </Button>
-        </div>
-      </template>
-
-      <template v-else>
-        <!-- Show album input screen when files dropped on album zone -->
-        <template v-if="showAlbumInput">
-          <div
-            class="flex flex-col items-center justify-center gap-6 p-8"
-            style="--wails-draggable: none"
-          >
-            <h1 class="text-xl font-semibold select-none">
-              Upload to Album
-            </h1>
-            <p class="text-muted-foreground select-none">
-              {{ pendingFileCount }} file(s) ready to upload
-            </p>
-            
-            <div class="flex flex-col gap-2 w-full max-w-xs">
-              <Label
-                for="album-input"
-                class="text-muted-foreground text-sm"
-              >Album name or key</Label>
-              <Input
-                id="album-input"
-                v-model="albumNameOrKey"
-                placeholder="Album name or AF1Qip... key"
-                autofocus
-              />
-            </div>
-
-            <div class="flex gap-4">
-              <Button
-                variant="outline"
-                class="cursor-pointer select-none"
-                @click="cancelAlbumUpload"
-              >
-                Cancel
-              </Button>
-              <Button
-                class="cursor-pointer select-none"
-                :disabled="!albumNameOrKey.trim()"
-                @click="confirmAlbumUpload"
-              >
-                Upload
-              </Button>
-            </div>
-          </div>
-        </template>
-
-        <!-- Normal UI when not dragging -->
-        <template v-else>
-          <h1 class="text-xl font-semibold select-none">
-            Drop files to upload
-          </h1>
+        <template v-if="options.length > 0">
           <GoogleAccountSelect
             v-model="selectedOption"
             :options="options"
@@ -427,76 +306,336 @@ onUnmounted(() => {
             @item-removed="removeCredentials"
             @add="openAccountSetup"
           />
-          <div
-            v-if="tokenBindingEmail"
-            class="w-full max-w-xs border rounded-lg p-3 flex flex-col gap-3"
-            style="--wails-draggable: none"
-          >
-            <p class="text-sm text-muted-foreground">
-              This credential needs a token binding key from the rooted Android device it was captured from.
+        </template>
+        <template v-else>
+          <div class="flex items-center gap-1.5 text-xs font-semibold tracking-tight text-foreground">
+            <span class="size-2 rounded-full bg-primary" />
+            <span>gotohp</span>
+          </div>
+        </template>
+      </div>
+
+      <div
+        class="flex items-center gap-1.5 shrink-0"
+        style="--wails-draggable: none"
+      >
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 text-xs px-2 cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-lg"
+          title="Manage Accounts"
+          @click="openAccountSetup"
+        >
+          <UserPlus
+            :size="13"
+            class="mr-1 text-primary"
+          />
+          <span>Accounts</span>
+        </Button>
+      </div>
+    </header>
+
+    <!-- Token Binding Alert Banner (if needed) -->
+    <div
+      v-if="tokenBindingEmail && activeTab === 'upload' && !uploadState.isUploading"
+      class="mx-3 mt-2 px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 flex items-center justify-between gap-2 shrink-0 text-xs"
+      style="--wails-draggable: none"
+    >
+      <div class="flex items-center gap-1.5 min-w-0 text-amber-500">
+        <Smartphone
+          :size="13"
+          class="shrink-0"
+        />
+        <span class="truncate text-[11px] font-medium">Token binding key required</span>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        class="h-6 text-[11px] px-2.5 font-medium border-amber-500/40 text-amber-500 hover:bg-amber-500/15 cursor-pointer shrink-0"
+        :disabled="isExtractingTokenBinding"
+        @click="addTokenBindingAliasFromADB"
+      >
+        {{ isExtractingTokenBinding ? 'Reading...' : 'Read ADB' }}
+      </Button>
+    </div>
+
+    <!-- Main View Area -->
+    <div
+      class="flex-1 min-h-0 relative overflow-hidden"
+      data-file-drop-target
+    >
+      <!-- Drop Zones Overlay when dragging files -->
+      <div
+        v-if="!uploadState.isUploading && isDraggingFiles && options.length > 0"
+        class="absolute inset-0 z-50 flex flex-col gap-2 p-3 bg-background/95 backdrop-blur-md"
+        style="--wails-draggable: none"
+      >
+        <div
+          data-file-drop-target
+          data-drop-zone="regular"
+          class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-primary/40 bg-primary/5 hover:border-primary hover:bg-primary/10 rounded-xl transition-all drop-zone group cursor-pointer"
+        >
+          <div class="size-9 rounded-full bg-primary/15 text-primary flex items-center justify-center mb-1.5 transition-transform group-hover:scale-110">
+            <UploadCloud :size="20" />
+          </div>
+          <h2 class="text-xs font-semibold text-foreground tracking-tight">
+            Upload Directly
+          </h2>
+          <p class="text-[11px] text-muted-foreground mt-0.5">
+            Store photos in library without album
+          </p>
+        </div>
+
+        <div
+          data-file-drop-target
+          data-drop-zone="album"
+          class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-indigo-500/40 bg-indigo-500/5 hover:border-indigo-500 hover:bg-indigo-500/10 rounded-xl transition-all drop-zone group cursor-pointer"
+        >
+          <div class="size-9 rounded-full bg-indigo-500/15 text-indigo-400 flex items-center justify-center mb-1.5 transition-transform group-hover:scale-110">
+            <FolderPlus :size="20" />
+          </div>
+          <h2 class="text-xs font-semibold text-foreground tracking-tight">
+            Upload to Specific Album
+          </h2>
+          <p class="text-[11px] text-muted-foreground mt-0.5">
+            Prompt for custom album name or key
+          </p>
+        </div>
+
+        <div
+          data-file-drop-target
+          data-drop-zone="auto-album"
+          class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-emerald-500/40 bg-emerald-500/5 hover:border-emerald-500 hover:bg-emerald-500/10 rounded-xl transition-all drop-zone group cursor-pointer"
+        >
+          <div class="size-9 rounded-full bg-emerald-500/15 text-emerald-400 flex items-center justify-center mb-1.5 transition-transform group-hover:scale-110">
+            <Layers :size="20" />
+          </div>
+          <h2 class="text-xs font-semibold text-foreground tracking-tight">
+            Auto Group by Folder
+          </h2>
+          <p class="text-[11px] text-muted-foreground mt-0.5">
+            Create albums matching directory names
+          </p>
+        </div>
+      </div>
+
+      <!-- Album Name Modal Prompt -->
+      <div
+        v-else-if="showAlbumInput"
+        class="absolute inset-0 z-50 flex flex-col items-center justify-center p-5 bg-background/90 backdrop-blur-md"
+        style="--wails-draggable: none"
+      >
+        <div class="w-full max-w-[280px] p-5 rounded-2xl border bg-card shadow-2xl flex flex-col items-center text-center gap-3.5">
+          <div class="size-11 rounded-full bg-primary/15 text-primary flex items-center justify-center">
+            <FolderPlus :size="22" />
+          </div>
+          <div>
+            <h2 class="text-sm font-semibold tracking-tight">
+              Create / Add to Album
+            </h2>
+            <p class="text-[11px] text-muted-foreground mt-0.5">
+              {{ pendingFileCount }} file(s) queued for upload
             </p>
-            <Button
-              class="cursor-pointer select-none"
-              :disabled="isExtractingTokenBinding"
-              @click="addTokenBindingAliasFromADB"
-            >
-              {{ isExtractingTokenBinding ? 'Reading ADB...' : 'Read from ADB' }}
-            </Button>
           </div>
 
-          <Sheet>
-            <SheetTrigger>
-              <Button
-                variant="outline"
-                class="cursor-pointer select-none"
-              >
-                Settings
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="bottom">
-              <TooltipProvider disable-hoverable-content>
-                <SettingsPanel />
-              </TooltipProvider>
-            </SheetContent>
-          </Sheet>
+          <div class="w-full text-left space-y-1">
+            <Label
+              for="album-name"
+              class="text-[11px] font-medium text-muted-foreground"
+            >Album Name or Key</Label>
+            <Input
+              id="album-name"
+              v-model="albumNameOrKey"
+              placeholder="e.g. Summer Vacation or AF1Qip..."
+              class="h-8 text-xs bg-background/80"
+              autofocus
+              @keydown.enter="confirmAlbumUpload"
+            />
+          </div>
 
-          <div
-            v-if="uploadState.uploadedFiles > 0 || uploadState.results.fail.length > 0"
-            class="flex flex-col items-center gap-2 border rounded-lg p-5 mt-5"
-          >
-            <h2 class="text-l font-semibold select-none ">
-              Upload Results
-            </h2>
-            <Label class="text-muted-foreground">Successful: {{ uploadState.results.success.length }}</Label>
-            <Label class="text-muted-foreground">Failed: {{ uploadState.results.fail.length }}</Label>
-            <Label class="text-muted-foreground">Skipped: {{ uploadState.results.skipped.length }}</Label>
-            <Label class="text-muted-foreground">Warnings: {{ uploadState.results.warnings.length }}</Label>
+          <div class="flex gap-2 w-full pt-1">
             <Button
               variant="outline"
-              class="cursor-pointer select-none min-w-[125px]"
-              @click="handleCopyClick"
+              size="sm"
+              class="flex-1 h-8 text-xs cursor-pointer"
+              @click="cancelAlbumUpload"
             >
-              {{ copyButtonText }}
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              class="flex-1 h-8 text-xs cursor-pointer font-medium"
+              :disabled="!albumNameOrKey.trim()"
+              @click="confirmAlbumUpload"
+            >
+              Start Upload
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 1: UPLOAD -->
+      <div
+        v-show="activeTab === 'upload'"
+        class="h-full w-full"
+      >
+        <template v-if="uploadState.isUploading">
+          <Upload />
+        </template>
+
+        <template v-else-if="options.length === 0">
+          <div class="h-full flex flex-col items-center justify-center p-6 text-center">
+            <div class="size-12 rounded-full bg-muted/60 border border-border/80 flex items-center justify-center text-muted-foreground mb-3">
+              <UserPlus :size="22" />
+            </div>
+            <h2 class="text-sm font-semibold tracking-tight">
+              Connect Google Photos
+            </h2>
+            <p class="text-xs text-muted-foreground mt-1 max-w-[240px] leading-relaxed">
+              Add a Google account before uploading photos and videos.
+            </p>
+            <Button
+              size="sm"
+              class="mt-4 cursor-pointer text-xs font-medium"
+              @click="openAccountSetup"
+            >
+              Add Google account
             </Button>
           </div>
         </template>
-      </template>
+
+        <template v-else>
+          <div class="h-full flex flex-col items-center justify-center p-4 text-center">
+            <div class="w-full max-w-[320px] p-5 rounded-2xl border border-dashed border-border/80 bg-card/30 flex flex-col items-center text-center transition-all hover:border-primary/40 hover:bg-card/50">
+              <div class="size-13 rounded-2xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center mb-2.5">
+                <UploadCloud :size="24" />
+              </div>
+              <h2 class="text-sm font-semibold tracking-tight text-foreground">
+                Drop files or folders here
+              </h2>
+              <p class="text-[11px] text-muted-foreground mt-1 max-w-[230px] leading-relaxed">
+                Drag photos, videos, or folders directly into this window to start uploading.
+              </p>
+
+              <div class="mt-4 grid grid-cols-3 gap-1.5 w-full pt-3.5 border-t border-border/60">
+                <div class="flex flex-col items-center gap-0.5 p-1.5 rounded-lg bg-background/50 border border-border/40 text-[10px] text-muted-foreground text-center">
+                  <UploadCloud
+                    :size="12"
+                    class="text-primary mb-0.5"
+                  />
+                  <span class="font-medium text-foreground">Direct</span>
+                  <span class="opacity-70 text-[9px] leading-none">No album</span>
+                </div>
+                <div class="flex flex-col items-center gap-0.5 p-1.5 rounded-lg bg-background/50 border border-border/40 text-[10px] text-muted-foreground text-center">
+                  <FolderPlus
+                    :size="12"
+                    class="text-indigo-400 mb-0.5"
+                  />
+                  <span class="font-medium text-foreground">To Album</span>
+                  <span class="opacity-70 text-[9px] leading-none">Pick name</span>
+                </div>
+                <div class="flex flex-col items-center gap-0.5 p-1.5 rounded-lg bg-background/50 border border-border/40 text-[10px] text-muted-foreground text-center">
+                  <Layers
+                    :size="12"
+                    class="text-emerald-400 mb-0.5"
+                  />
+                  <span class="font-medium text-foreground">Auto</span>
+                  <span class="opacity-70 text-[9px] leading-none">By folder</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- TAB 2: RESULTS -->
+      <div
+        v-show="activeTab === 'results'"
+        class="h-full w-full"
+      >
+        <UploadResults @clear="activeTab = 'upload'" />
+      </div>
+
+      <!-- TAB 3: SETTINGS -->
+      <div
+        v-show="activeTab === 'settings'"
+        class="h-full w-full"
+      >
+        <TooltipProvider disable-hoverable-content>
+          <SettingsPanel />
+        </TooltipProvider>
+      </div>
     </div>
-    <div
-      v-if="uploadState.isUploading"
-      class="w-full h-full"
-    >
-      <Upload />
-    </div>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="h-11 border-t bg-card/60 backdrop-blur-md shrink-0 flex items-center justify-around px-3 select-none">
+      <button
+        type="button"
+        class="flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg transition-all cursor-pointer text-xs"
+        :class="[
+          activeTab === 'upload'
+            ? 'bg-primary/10 text-primary font-medium'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+        ]"
+        @click="activeTab = 'upload'"
+      >
+        <div class="relative flex items-center justify-center">
+          <UploadCloud :size="15" />
+          <span
+            v-if="uploadState.isUploading"
+            class="absolute -top-1 -right-1 size-1.5 rounded-full bg-primary animate-ping"
+          />
+        </div>
+        <span class="text-[11px]">Upload</span>
+      </button>
+
+      <button
+        type="button"
+        class="flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg transition-all cursor-pointer text-xs"
+        :class="[
+          activeTab === 'results'
+            ? 'bg-primary/10 text-primary font-medium'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+        ]"
+        @click="activeTab = 'results'"
+      >
+        <div class="relative flex items-center justify-center">
+          <ListCheck :size="15" />
+          <span
+            v-if="uploadState.results.fail.length > 0"
+            class="absolute -top-1 -right-1 size-1.5 rounded-full bg-destructive"
+          />
+        </div>
+        <span class="text-[11px]">Results</span>
+      </button>
+
+      <button
+        type="button"
+        class="flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg transition-all cursor-pointer text-xs"
+        :class="[
+          activeTab === 'settings'
+            ? 'bg-primary/10 text-primary font-medium'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+        ]"
+        @click="activeTab = 'settings'"
+      >
+        <Settings2 :size="15" />
+        <span class="text-[11px]">Settings</span>
+      </button>
+    </nav>
+
+    <!-- Account Setup Modal -->
     <GoogleAuthSetup
       v-model:open="isAccountSetupOpen"
       @account-added="refreshCredentials"
     />
+
+    <!-- Non-intrusive Toaster placed at top-center -->
     <Toaster
-      position="bottom-center"
+      position="top-center"
       rich-colors
-      expand
-      :visible-toasts="4"
+      :duration="3000"
+      :visible-toasts="2"
     />
   </main>
 </template>

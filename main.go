@@ -46,20 +46,21 @@ func runGUI() {
 			application.NewService(configManager),
 		},
 		Assets: application.AssetOptions{
-			Handler: application.BundledAssetFileServer(assets),
+			Handler: application.BundledAssetFileServer(uiAssets()),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
 
+	winWidth, winHeight, winResizable := uiWindowSize()
 	window := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:               title,
 		Frameless:           false,
-		Width:               400,
-		Height:              600,
+		Width:               winWidth,
+		Height:              winHeight,
 		EnableFileDrop:      true,
-		DisableResize:       true,
+		DisableResize:       !winResizable,
 		MaximiseButtonState: application.ButtonDisabled,
 		BackgroundType:      application.BackgroundTypeTranslucent,
 		Mac: application.MacWindow{

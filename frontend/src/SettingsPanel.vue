@@ -4,12 +4,13 @@ import { ConfigManager } from '../bindings/app/core'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
     Tooltip,
     TooltipContent,
     TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { Info } from '@lucide/vue'
+import { Info, Sliders, Image, Network, ShieldAlert } from '@lucide/vue'
 
 import {
     NumberField,
@@ -152,218 +153,311 @@ watch(() => settings.value.uploadThreads, async (newValue) => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-2.5 m-4">
-    <NumberField
-      v-model="settings.uploadThreads"
-      class="flex items-center justify-between"
-    >
-      <Label
-        for="upload-threads"
-        class="size-full"
-      >Upload Threads</Label>
-      <NumberFieldContent>
-        <NumberFieldDecrement
-          class="cursor-pointer"
-          :disabled="settings.uploadThreads <= 1"
-        />
-        <NumberFieldInput />
-        <NumberFieldIncrement class="cursor-pointer" />
-      </NumberFieldContent>
-    </NumberField>
-    <div class="flex items-center justify-between">
-      <Label
-        for="use-quota"
-        class="size-full cursor-pointer"
-      >Use Quota</Label>
-      <Switch
-        id="use-quota"
-        v-model="settings.useQuota"
-      />
+  <div class="flex flex-col h-full w-full px-4 py-3 select-none">
+    <!-- Header -->
+    <div class="mb-2.5 shrink-0">
+      <h1 class="text-sm font-semibold tracking-tight text-foreground leading-tight">
+        Settings
+      </h1>
+      <p class="text-[11px] text-muted-foreground">
+        Upload behavior and preferences
+      </p>
     </div>
-    <div class="flex items-center justify-between">
-      <Label
-        for="saver-mode"
-        class="size-full cursor-pointer"
-      >Storage Saver Quality</Label>
-      <Switch
-        id="saver-mode"
-        v-model="settings.saver"
-      />
-    </div>
-    <div class="flex items-center justify-between">
-      <Label
-        for="recursive"
-        class="size-full cursor-pointer"
-      >Recursive Directory Upload</Label>
-      <Switch
-        id="recursive"
-        v-model="settings.recursive"
-      />
-    </div>
-    <div class="flex items-center justify-between">
-      <div
-        class="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5"
-        @click.self="toggleSetting('forceUpload')"
-      >
-        <Label
-          for="force-upload"
-          class="cursor-pointer"
-        >Force Upload</Label>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <button
-              type="button"
-              class="inline-flex size-5 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              aria-label="About Force Upload"
+
+    <!-- Scrollable settings body -->
+    <div class="flex-1 min-h-0">
+      <ScrollArea class="h-full">
+        <div class="space-y-3.5 pr-2 pb-4">
+          <!-- Section 1: Upload & Concurrency -->
+          <div class="rounded-xl border border-border/60 bg-card/40 p-3 space-y-2 shadow-2xs">
+            <div class="flex items-center gap-1.5 text-xs font-semibold text-primary mb-1">
+              <Sliders :size="13" />
+              <span>Upload & Concurrency</span>
+            </div>
+
+            <NumberField
+              v-model="settings.uploadThreads"
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg"
+              :min="1"
             >
-              <Info class="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent class="max-w-72">
-            Applies to single files. Live Photo pairs always check both components for duplicates.
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <Switch
-        id="force-upload"
-        v-model="settings.forceUpload"
-      />
-    </div>
-    <div class="flex items-center justify-between">
-      <div
-        class="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 pr-4"
-        @click.self="toggleSetting('pairLivePhotos')"
-      >
-        <Label
-          for="pair-live-photos"
-          class="cursor-pointer"
-        >Pair Apple Live Photos</Label>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <button
-              type="button"
-              class="inline-flex size-5 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              aria-label="About Pair Apple Live Photos"
+              <Label
+                for="upload-threads"
+                class="text-xs font-medium cursor-pointer"
+              >Upload Threads</Label>
+              <NumberFieldContent class="w-24">
+                <NumberFieldDecrement
+                  class="cursor-pointer size-7"
+                  :disabled="settings.uploadThreads <= 1"
+                />
+                <NumberFieldInput class="h-7 text-xs text-center px-7 bg-background/80" />
+                <NumberFieldIncrement class="cursor-pointer size-7" />
+              </NumberFieldContent>
+            </NumberField>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg hover:bg-accent/40 transition-colors cursor-pointer"
+              @click="toggleSetting('useQuota')"
             >
-              <Info class="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent class="max-w-72">
-            Identify Apple Live Photo image and MOV pairs via embedded metadata and upload them as one item.
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <Switch
-        id="pair-live-photos"
-        v-model="settings.pairLivePhotos"
-      />
-    </div>
-    <div
-      class="flex items-center justify-between pl-4 transition-opacity"
-      :class="settings.pairLivePhotos ? 'opacity-100' : 'opacity-45'"
-    >
-      <div
-        class="flex min-w-0 flex-1 items-center gap-1.5 pr-4"
-        :class="settings.pairLivePhotos ? 'cursor-pointer' : 'cursor-not-allowed'"
-        @click.self="toggleSetting('skipIncompleteLivePhotos', settings.pairLivePhotos)"
-      >
-        <Label
-          for="skip-incomplete-live-photos"
-          :class="settings.pairLivePhotos ? 'cursor-pointer' : 'cursor-not-allowed'"
-        >Skip Incomplete Live Photos</Label>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <button
-              type="button"
-              class="inline-flex size-5 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              aria-label="About Skip Incomplete Live Photos"
+              <Label
+                for="use-quota"
+                class="text-xs font-medium cursor-pointer pointer-events-none"
+              >Use Quota</Label>
+              <Switch
+                id="use-quota"
+                v-model="settings.useQuota"
+                @click.stop
+              />
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg hover:bg-accent/40 transition-colors cursor-pointer"
+              @click="toggleSetting('saver')"
             >
-              <Info class="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent class="max-w-72">
-            Only upload Live Photos when both photo and video are available. If either is missing,
-            don't upload the remaining file separately.
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <Switch
-        id="skip-incomplete-live-photos"
-        v-model="settings.skipIncompleteLivePhotos"
-        :disabled="!settings.pairLivePhotos"
-      />
-    </div>
-    <div
-      class="flex items-center justify-between pl-4 transition-opacity"
-      :class="settings.pairLivePhotos ? 'opacity-100' : 'opacity-45'"
-    >
-      <div
-        class="flex min-w-0 flex-1 items-center gap-1.5 pr-4"
-        :class="settings.pairLivePhotos ? 'cursor-pointer' : 'cursor-not-allowed'"
-        @click.self="toggleSetting('updateExistingPhotosToLive', settings.pairLivePhotos)"
-      >
-        <Label
-          for="update-existing-photos-to-live"
-          :class="settings.pairLivePhotos ? 'cursor-pointer' : 'cursor-not-allowed'"
-        >Update Existing Photos to Live Photos</Label>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <button
-              type="button"
-              class="inline-flex size-5 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              aria-label="About Update Existing Photos to Live Photos"
+              <Label
+                for="saver-mode"
+                class="text-xs font-medium cursor-pointer pointer-events-none"
+              >Storage Saver Quality</Label>
+              <Switch
+                id="saver-mode"
+                v-model="settings.saver"
+                @click.stop
+              />
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg hover:bg-accent/40 transition-colors cursor-pointer"
+              @click="toggleSetting('recursive')"
             >
-              <Info class="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent class="max-w-72">
-            If a static photo was already uploaded, re-upload it alongside its MOV companion to upgrade it to a Live Photo. Both local photo and video files are required.
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <Switch
-        id="update-existing-photos-to-live"
-        v-model="settings.updateExistingPhotosToLive"
-        :disabled="!settings.pairLivePhotos"
-      />
-    </div>
-    <div class="flex items-center justify-between">
-      <Label
-        for="filter-unsupported"
-        class="size-full cursor-pointer"
-      >Disable Unsupported Files Filter</Label>
-      <Switch
-        id="filter-unsupported"
-        v-model="settings.disableUnsupportedFilesFilter"
-      />
-    </div>
-    <div class="flex items-center justify-between">
-      <Label
-        for="set-date-from-filename"
-        class="size-full cursor-pointer"
-      >Set Upload Date from Filename</Label>
-      <Switch
-        id="set-date-from-filename"
-        v-model="settings.setDateFromFilename"
-      />
-    </div>
-    <div class="flex items-center justify-between">
-      <Label
-        for="delete-host"
-        class="size-full cursor-pointer"
-      >Delete From Host After Upload</Label>
-      <Switch
-        id="delete-host"
-        v-model="settings.deleteFromHost"
-        variant="destructive"
-      />
-    </div>
-    <div>
-      <Input
-        v-model="settings.proxy"
-        type="text"
-        placeholder="Proxy URL (optional)"
-      />
+              <Label
+                for="recursive"
+                class="text-xs font-medium cursor-pointer pointer-events-none"
+              >Recursive Directory Upload</Label>
+              <Switch
+                id="recursive"
+                v-model="settings.recursive"
+                @click.stop
+              />
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg hover:bg-accent/40 transition-colors cursor-pointer"
+              @click="toggleSetting('forceUpload')"
+            >
+              <div class="flex min-w-0 flex-1 items-center gap-1.5 pointer-events-none">
+                <Label
+                  for="force-upload"
+                  class="text-xs font-medium cursor-pointer"
+                >Force Upload</Label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="pointer-events-auto inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                      aria-label="About Force Upload"
+                    >
+                      <Info class="size-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-64 text-xs">
+                    Applies to single files. Live Photo pairs always check both components for duplicates.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <Switch
+                id="force-upload"
+                v-model="settings.forceUpload"
+                @click.stop
+              />
+            </div>
+          </div>
+
+          <!-- Section 2: Apple Live Photos -->
+          <div class="rounded-xl border border-border/60 bg-card/40 p-3 space-y-2 shadow-2xs">
+            <div class="flex items-center gap-1.5 text-xs font-semibold text-primary mb-1">
+              <Image :size="13" />
+              <span>Apple Live Photos</span>
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg hover:bg-accent/40 transition-colors cursor-pointer"
+              @click="toggleSetting('pairLivePhotos')"
+            >
+              <div class="flex min-w-0 flex-1 items-center gap-1.5 pr-2 pointer-events-none">
+                <Label
+                  for="pair-live-photos"
+                  class="text-xs font-medium cursor-pointer"
+                >Pair Apple Live Photos</Label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="pointer-events-auto inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                      aria-label="About Pair Apple Live Photos"
+                    >
+                      <Info class="size-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-64 text-xs">
+                    Identify Apple Live Photo image and MOV pairs via embedded metadata and upload them as one item.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <Switch
+                id="pair-live-photos"
+                v-model="settings.pairLivePhotos"
+                @click.stop
+              />
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg pl-3 transition-all"
+              :class="[
+                settings.pairLivePhotos
+                  ? 'hover:bg-accent/40 opacity-100 cursor-pointer'
+                  : 'opacity-40 cursor-not-allowed'
+              ]"
+              @click="toggleSetting('skipIncompleteLivePhotos', settings.pairLivePhotos)"
+            >
+              <div class="flex min-w-0 flex-1 items-center gap-1.5 pr-2 pointer-events-none">
+                <Label
+                  for="skip-incomplete-live-photos"
+                  class="text-xs"
+                >Skip Incomplete Pairs</Label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="pointer-events-auto inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                      aria-label="About Skip Incomplete Live Photos"
+                    >
+                      <Info class="size-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-64 text-xs">
+                    Only upload Live Photos when both photo and video are present.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <Switch
+                id="skip-incomplete-live-photos"
+                v-model="settings.skipIncompleteLivePhotos"
+                :disabled="!settings.pairLivePhotos"
+                @click.stop
+              />
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg pl-3 transition-all"
+              :class="[
+                settings.pairLivePhotos
+                  ? 'hover:bg-accent/40 opacity-100 cursor-pointer'
+                  : 'opacity-40 cursor-not-allowed'
+              ]"
+              @click="toggleSetting('updateExistingPhotosToLive', settings.pairLivePhotos)"
+            >
+              <div class="flex min-w-0 flex-1 items-center gap-1.5 pr-2 pointer-events-none">
+                <Label
+                  for="update-existing-photos-to-live"
+                  class="text-xs"
+                >Upgrade Existing to Live</Label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="pointer-events-auto inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                      aria-label="About Upgrade Existing to Live"
+                    >
+                      <Info class="size-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-64 text-xs">
+                    If a static photo was already uploaded, re-upload it with MOV to upgrade it.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <Switch
+                id="update-existing-photos-to-live"
+                v-model="settings.updateExistingPhotosToLive"
+                :disabled="!settings.pairLivePhotos"
+                @click.stop
+              />
+            </div>
+          </div>
+
+          <!-- Section 3: File & System Options -->
+          <div class="rounded-xl border border-border/60 bg-card/40 p-3 space-y-2 shadow-2xs">
+            <div class="flex items-center gap-1.5 text-xs font-semibold text-primary mb-1">
+              <ShieldAlert :size="13" />
+              <span>File Handling</span>
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg hover:bg-accent/40 transition-colors cursor-pointer"
+              @click="toggleSetting('disableUnsupportedFilesFilter')"
+            >
+              <Label
+                for="filter-unsupported"
+                class="text-xs font-medium cursor-pointer pointer-events-none"
+              >Disable Unsupported Files Filter</Label>
+              <Switch
+                id="filter-unsupported"
+                v-model="settings.disableUnsupportedFilesFilter"
+                @click.stop
+              />
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg hover:bg-accent/40 transition-colors cursor-pointer"
+              @click="toggleSetting('setDateFromFilename')"
+            >
+              <Label
+                for="set-date-from-filename"
+                class="text-xs font-medium cursor-pointer pointer-events-none"
+              >Set Date from Filename</Label>
+              <Switch
+                id="set-date-from-filename"
+                v-model="settings.setDateFromFilename"
+                @click.stop
+              />
+            </div>
+
+            <div
+              class="flex items-center justify-between py-1 px-2 -mx-2 rounded-lg hover:bg-destructive/10 transition-colors cursor-pointer"
+              @click="toggleSetting('deleteFromHost')"
+            >
+              <Label
+                for="delete-host"
+                class="text-xs font-medium text-destructive cursor-pointer pointer-events-none"
+              >Delete From Host After Upload</Label>
+              <Switch
+                id="delete-host"
+                v-model="settings.deleteFromHost"
+                variant="destructive"
+                @click.stop
+              />
+            </div>
+          </div>
+
+          <!-- Section 4: Network & Proxy -->
+          <div class="rounded-xl border border-border/60 bg-card/40 p-3 space-y-2 shadow-2xs">
+            <div class="flex items-center gap-1.5 text-xs font-semibold text-primary mb-1">
+              <Network :size="13" />
+              <span>Network & Proxy</span>
+            </div>
+            <Label
+              for="proxy-url"
+              class="text-[11px] text-muted-foreground"
+            >Proxy URL (optional)</Label>
+            <Input
+              id="proxy-url"
+              v-model="settings.proxy"
+              type="text"
+              placeholder="http://127.0.0.1:8080 or socks5://..."
+              class="h-8 text-xs bg-background/80"
+            />
+          </div>
+        </div>
+      </ScrollArea>
     </div>
   </div>
 </template>
