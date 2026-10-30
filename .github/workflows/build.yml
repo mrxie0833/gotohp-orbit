@@ -170,8 +170,16 @@ jobs:
           task common:update:build-assets
 
           # Build the GUI application with production flags
-          task windows:build
-          Move-Item -Path "bin\gotohp.exe" -Destination "release\gotohp-x64.exe"
+          $output = "bin\gotohp.exe"
+          task windows:build OUTPUT=$output
+          # task windows:build
+
+          if (-not (Test-Path $output)) {
+          Get-ChildItem -Path "bin" -Recurse | Format-Table FullName
+          throw "Windows build did not produce $output"
+          }
+          
+          Move-Item -Path $output -Destination "release\gotohp-x64.exe"
 
           # Build standalone CLI binary without Wails/WebView dependencies
           $env:CGO_ENABLED="0"
@@ -189,6 +197,11 @@ jobs:
 
           # Build GUI debug version
           wails3 build DEV=true
+          if (-not (Test-Path "bin\gotohp.exe")) {
+          Get-ChildItem -Path "bin" -Recurse | Format-Table FullName
+          throw "Debug build did not produce bin\gotohp.exe"
+          }
+
           Move-Item -Path "bin\gotohp.exe" -Destination "release\gotohp-x64_debug.exe"
 
           # Build CLI debug version without Wails/WebView dependencies
